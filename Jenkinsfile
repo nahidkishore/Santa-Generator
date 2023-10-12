@@ -4,83 +4,110 @@ pipeline {
         jdk 'jdk17'
         maven 'maven3'
     }
-    environment{
-        SCANNER_HOME= tool 'sonar-scanner'
+    
+     environment {
+        SCANNER_HOME=tool 'sonar-scanner'
     }
 
+
     stages {
-        stage('git-checkout') {
-            steps {
-                git 'https://github.com/jaiswaladi246/secretsanta-generator.git'
-            }
-        }
+     
 
-        stage('Code-Compile') {
-            steps {
-               sh "mvn clean compile"
+
+        stage("Git Checkout"){
+            steps{
+               git branch: 'main', url: 'https://github.com/nahidkishore/Santa-Generator.git'
             }
         }
         
-        stage('Unit Tests') {
-            steps {
-               sh "mvn test"
+        stage("Compile"){
+            steps{
+                sh "mvn clean compile -DskipTests=true"
+            }
+        }
+          stage("Test Cases"){
+            steps{
+                sh "mvn test -DskipTests=true"
+            }
+        }
+         stage("Trivy FS Scan"){
+           steps{
+               sh "trivy fs . > trivy.txt" 
+            }
+        }
+
+         stage("OWASP Dependency Check"){
+           steps{
+                dependencyCheck additionalArguments: '--scan ./' , odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
         
-		stage('OWASP Dependency Check') {
-            steps {
-               dependencyCheck additionalArguments: ' --scan ./ ', odcInstallation: 'DC'
-                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+        stage("Sonarqube Analysis "){
+            steps{
+                withSonarQubeEnv('sonar-server') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=santa-app \
+                    -Dsonar.java.binaries=. \
+                    -Dsonar.projectKey=santa-app '''
+                }
             }
         }
+        
+        stage("SonarQube Quality Gate"){
+       
+             steps {
+                waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token' 
+         }
+
+     }
+     
+     stage("Build Artifact"){
+            steps{
+                sh "mvn clean install -DskipTests=true"
+            }
+        }
+       
+        
+
+        stage("Build and Push to Docker Hub"){
+               steps{
+                   
+                echo 'login into docker hub and pushing image....'
+                withCredentials([usernamePassword(credentialsId: 'dockerHub', passwordVariable: 'dockerHubPassword', usernameVariable: 'dockerHubUser')]){
+                     sh "docker build . -t santa-app"
+                     sh "docker tag santa-app ${env.dockerHubUser}/santa-app:latest"
+                     sh "docker login -u ${env.dockerHubUser} -p ${env.dockerHubPassword}"
+                     sh "docker push ${env.dockerHubUser}/santa-app:latest"
 
 
-        stage('Sonar Analysis') {
-            steps {
-               withSonarQubeEnv('sonar'){
-                   sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Santa \
-                   -Dsonar.java.binaries=. \
-                   -Dsonar.projectKey=Santa '''
                }
+           }
+         }
+
+         stage("Deploy to Container"){
+            steps{
+                sh " docker run -d --name santa-app -p 8085:8080 nahid0002/santa-app:latest "
             }
         }
 
-		 
-        stage('Code-Build') {
-            steps {
-               sh "mvn clean package"
-            }
-        }
+           stage("TRIVY"){
+            steps{
 
-         stage('Docker Build') {
-            steps {
-               script{
-                   withDockerRegistry(credentialsId: 'docker-cred') {
-                    sh "docker build -t  santa123 . "
-                 }
+                withCredentials([usernamePassword(credentialsId: 'dockerHub', passwordVariable: 'dockerHubPassword', usernameVariable: 'dockerHubUser')]){
+                     
+                    sh "trivy image ${env.dockerHubUser}/santa-app:latest > trivy.txt" 
+
+
                }
-            }
-        }
-
-        stage('Docker Push') {
-            steps {
-               script{
-                   withDockerRegistry(credentialsId: 'docker-cred') {
-                    sh "docker tag santa123 adijaiswal/santa123:latest"
-                    sh "docker push adijaiswal/santa123:latest"
-                 }
-               }
+                
             }
         }
         
-        	 
-        stage('Docker Image Scan') {
-            steps {
-               sh "trivy image adijaiswal/santa123:latest "
-            }
-        }}
-        
-         post {
+
+    }
+
+
+      post {
             always {
                 emailext (
                     subject: "Pipeline Status: ${BUILD_NUMBER}",
@@ -91,15 +118,11 @@ pipeline {
                                     <p>Check the <a href="${BUILD_URL}">console output</a>.</p>
                                 </body>
                             </html>''',
-                    to: 'jaiswaladi246@gmail.com',
+                    to: 'nahidkishore99@gmail.com',
                     from: 'jenkins@example.com',
                     replyTo: 'jenkins@example.com',
                     mimeType: 'text/html'
                 )
             }
         }
-		
-		
-
-    
 }
