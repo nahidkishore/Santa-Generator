@@ -90,7 +90,7 @@ pipeline {
             }
         }
 
-           stage("TRIVY"){
+          stage("TRIVY"){
             steps{
 
                 withCredentials([usernamePassword(credentialsId: 'dockerHub', passwordVariable: 'dockerHubPassword', usernameVariable: 'dockerHubUser')]){
@@ -100,6 +100,19 @@ pipeline {
 
                }
                 
+            }
+        }
+
+         
+
+        stage('Deploy to kubernetes') {
+            steps {
+                script {
+                   
+                    withKubeConfig([credentialsId: 'K8s', serverUrl: '']) {
+                        sh ('kubectl apply -f deployment.yaml')
+                    }
+                }
             }
         }
         
